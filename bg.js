@@ -50,57 +50,82 @@
   window.addEventListener('resize', () => { resize(); if (reduceMotion) frame(performance.now()); });
   resize();
 
-  // ---- DNA helix ----
-  let phase = 0;
+  // ---- DNA helix (B-DNA: ~10.5 bp per turn, unequal major/minor grooves) ----
+  let spin = 0;        // rotation of the helix around its own axis
+  let shift = 0;       // travel of the helix along its axis
+  const PAIRS = ['AT', 'TA', 'CG', 'GC'];
+  const pairAt = n => PAIRS[((n * 2654435761) >>> 0) % 4];   // stable pseudo-random sequence
+  const GROOVE = Math.PI * 0.72;                               // strand phase offset -> major/minor grooves
+
   function drawDNA() {
     const diag = Math.hypot(W, H);
-    const amp = Math.max(70, Math.min(W, H) * 0.17);    // helix radius (big)
-    const pitch = amp * 4.2;                             // length of one full turn
+    const amp = Math.max(90, Math.min(220, Math.min(W, H) * 0.21));  // helix radius
+    const pitch = amp * 3.4;                                          // B-DNA pitch/diameter ~1.7
     const k = (Math.PI * 2) / pitch;
-    const angle = -Math.atan2(H, W) * 0.85;              // diagonal: bottom-left -> top-right
-
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.rotate(angle);
-
+    const gap = pitch / 10.5;                                         // rise per base pair
+    const ang = -Math.atan2(H, W) * 0.85;
+    const ca = Math.cos(ang), sa = Math.sin(ang), cx = W / 2, cy = H / 2;
+    const P = (t, y) => [cx + t * ca - y * sa, cy + t * sa + y * ca];  // helix frame -> screen
     const half = diag / 2 + pitch;
-    const step = 6;
+    const phaseAt = t => k * (t - shift) + spin;
 
-    // base-pair rungs
-    const rungGap = pitch / 10;
-    const startRung = Math.floor((-half - phase / k) / rungGap) * rungGap;
-    for (let t = startRung; t < half; t += rungGap) {
-      const a = k * t + phase;
-      const y1 = amp * Math.sin(a), y2 = -y1;
-      const depth = (Math.cos(a) + 1) / 2;                // 0 back .. 1 front
-      ctx.strokeStyle = `rgba(70, 110, 210, ${0.10 + 0.22 * depth})`;
-      ctx.lineWidth = 2 + 2 * depth;
-      ctx.beginPath();
-      ctx.moveTo(t, y1);
-      ctx.lineTo(t, y2);
-      ctx.stroke();
-      // nucleotide ends
-      ctx.fillStyle = `rgba(90, 140, 240, ${0.18 + 0.35 * depth})`;
-      ctx.beginPath(); ctx.arc(t, y1, 3 + 3 * depth, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = `rgba(90, 140, 240, ${0.18 + 0.35 * (1 - depth)})`;
-      ctx.beginPath(); ctx.arc(t, y2, 3 + 3 * (1 - depth), 0, Math.PI * 2); ctx.fill();
-    }
-
-    // two backbones, drawn in short segments so thickness follows depth
-    for (const sign of [1, -1]) {
+    // backbone segments, split into back and front layers for a 3D look
+    const step = 5, back = [], front = [];
+    for (const off of [0, GROOVE]) {
       for (let t = -half; t < half; t += step) {
-        const a1 = k * t + phase, a2 = k * (t + step) + phase;
-        const depth = (sign * Math.cos(a1) + 1) / 2;
-        ctx.strokeStyle = `rgba(40, 80, 190, ${0.22 + 0.45 * depth})`;
-        ctx.lineWidth = 3 + 6 * depth;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(t, sign * amp * Math.sin(a1));
-        ctx.lineTo(t + step, sign * amp * Math.sin(a2));
-        ctx.stroke();
+        const a1 = phaseAt(t) + off, a2 = phaseAt(t + step) + off;
+        const depth = (Math.cos(a1) + 1) / 2;
+        const seg = { p1: P(t, amp * Math.sin(a1)), p2: P(t + step, amp * Math.sin(a2)), depth };
+        (depth < 0.5 ? back : front).push(seg);
       }
     }
-    ctx.restore();
+    const drawSegs = segs => {
+      ctx.lineCap = 'round';
+      for (const s of segs) {
+        ctx.strokeStyle = `rgba(30, 58, 138, ${0.16 + 0.40 * s.depth})`;
+        ctx.lineWidth = 8 + 10 * s.depth;
+        ctx.beginPath(); ctx.moveTo(s.p1[0], s.p1[1]); ctx.lineTo(s.p2[0], s.p2[1]); ctx.stroke();
+      }
+    };
+    drawSegs(back);
+
+    // base pairs: letters + dotted hydrogen bonds (A-T: 2, C-G: 3)
+    const n0 = Math.floor((-half - shift) / gap), n1 = Math.ceil((half - shift) / gap);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let n = n0; n <= n1; n++) {
+      const t = n * gap + shift;
+      const a = phaseAt(t);
+      const y1 = amp * Math.sin(a), y2 = amp * Math.sin(a + GROOVE);
+      const d = Math.abs(y2 - y1);
+      if (d < 40) continue;                                   // edge-on pairs are hidden
+      const depth = ((Math.cos(a) + Math.cos(a + GROOVE)) / 2 + 1) / 2;
+      const alpha = 0.22 + 0.42 * depth;
+      const pair = pairAt(n);
+      const dir = Math.sign(y2 - y1);
+      const yA = y1 + dir * 16, yB = y2 - dir * 16;           // letter positions near each strand
+      const bonds = pair === 'AT' || pair === 'TA' ? 2 : 3;
+
+      // dotted H-bonds between the two letters
+      ctx.fillStyle = `rgba(30, 58, 138, ${alpha})`;
+      const inner1 = yA + dir * 12, inner2 = yB - dir * 12;
+      const len = Math.abs(inner2 - inner1);
+      const dots = Math.max(2, Math.floor(len / 7));
+      for (let b = 0; b < bonds; b++) {
+        const dt = (b - (bonds - 1) / 2) * 5;                 // parallel bond lines
+        for (let i = 0; i <= dots; i++) {
+          const yy = inner1 + (inner2 - inner1) * (i / dots);
+          const [x, y] = P(t + dt, yy);
+          ctx.beginPath(); ctx.arc(x, y, 1.4 + 0.6 * depth, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      // base letters
+      ctx.font = `700 ${Math.round(12 + 6 * depth)}px "JetBrains Mono", monospace`;
+      ctx.fillStyle = `rgba(13, 42, 120, ${alpha + 0.1})`;
+      let [x, y] = P(t, yA); ctx.fillText(pair[0], x, y);
+      [x, y] = P(t, yB); ctx.fillText(pair[1], x, y);
+    }
+
+    drawSegs(front);
   }
 
   // ---- binary rain ----
@@ -116,14 +141,14 @@
         Object.assign(c, makeColumn(Math.floor(Math.random() * columns.length), columns.length));
         c.y = -c.spacing;
       }
-      ctx.font = `${c.size}px "DM Mono", monospace`;
+      ctx.font = `500 ${c.size}px "JetBrains Mono", monospace`;
       for (let i = 0; i < DIGITS_PER_COLUMN; i++) {
         const y = c.y - i * c.spacing;                   // i = 0 is the leading digit
         const x = c.x - i * c.spacing * c.drift;
         if (y < -20 || y > H + 20) continue;
         if (Math.random() < 0.004) c.digits[i] = c.digits[i] === '0' ? '1' : '0';
-        const alpha = i === 0 ? 0.42 : 0.30 * (1 - i / DIGITS_PER_COLUMN) + 0.04;
-        ctx.fillStyle = i === 0 ? `rgba(160, 220, 255, ${alpha})` : `rgba(100, 170, 240, ${alpha})`;
+        const alpha = i === 0 ? 0.40 : 0.28 * (1 - i / DIGITS_PER_COLUMN) + 0.05;
+        ctx.fillStyle = i === 0 ? `rgba(11, 122, 106, ${alpha})` : `rgba(37, 99, 235, ${alpha})`;
         ctx.fillText(c.digits[i], x, y);
       }
     }
@@ -136,7 +161,8 @@
     last = now;
     boost *= Math.pow(0.12, dt);                         // ease back to normal speed
     const speedMul = BASE_SPEED + boost;
-    phase += 0.6 * speedMul * dt;
+    spin += 0.55 * speedMul * dt;
+    shift += 22 * speedMul * dt;
 
     ctx.clearRect(0, 0, W, H);
     drawDNA();
