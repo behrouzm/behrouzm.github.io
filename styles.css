@@ -16,10 +16,14 @@
 /* ── RESET ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  background: radial-gradient(ellipse at 30% 20%, #0f1a33 0%, #0a1022 55%, #070b17 100%) fixed;
+  background-color: #0a1022;
+}
 
 body {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font-family: var(--body-font);
   font-size: 16px;
@@ -27,10 +31,18 @@ body {
   overflow-x: hidden;
 }
 
+/* ── ANIMATED BACKGROUND ── */
+#bg-canvas {
+  position: fixed; inset: 0;
+  width: 100vw; height: 100vh;
+  z-index: -1;
+  pointer-events: none;
+}
+
 /* ── NAV ── */
 nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  background: rgba(13,15,20,0.88);
+  background: rgba(10,16,34,0.85);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
